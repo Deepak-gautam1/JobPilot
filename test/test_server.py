@@ -6,18 +6,30 @@ import asyncio
 import json
 import subprocess
 import sys
+import os
 
-async def test_mcp_server():
+# Add the parent directory to the path so we can import the package
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+# For pytest-asyncio compatibility
+try:
+    import pytest
+    pytest_asyncio_available = True
+except ImportError:
+    pytest_asyncio_available = False
+
+async def test_mcp_server_async():
     """Test the MCP server by sending a simple request"""
     print("Testing JobSpy MCP Server...")
     
-    # Start the server process
+    # Start the server process using the package
     process = subprocess.Popen(
-        [sys.executable, "../server.py"],
+        [sys.executable, "-m", "jobspy_mcp_server.server"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True
+        text=True,
+        cwd=os.path.join(os.path.dirname(__file__), '..')
     )
     
     try:
@@ -80,5 +92,11 @@ async def test_mcp_server():
         except asyncio.TimeoutError:
             process.kill()
 
+# For direct execution
 if __name__ == "__main__":
-    asyncio.run(test_mcp_server())
+    asyncio.run(test_mcp_server_async())
+
+# For pytest execution with pytest-asyncio
+if pytest_asyncio_available:
+    import pytest
+    test_mcp_server = pytest.mark.asyncio(test_mcp_server_async)

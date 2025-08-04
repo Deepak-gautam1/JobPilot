@@ -268,8 +268,8 @@ def get_supported_sites() -> str:
             response += f"- **{site}**: {description}\n"
         
         response += "\n## 💡 Usage Tips\n"
-        response += "- **Best for beginners**: Start with `['indeed', 'zip_recruiter']`\n"
-        response += "- **For comprehensive search**: Use `['indeed', 'linkedin', 'glassdoor', 'google']`\n"
+        response += "- **Best for beginners**: Start with `[\'indeed\', \'zip_recruiter\']`\n"
+        response += "- **For comprehensive search**: Use `[\'indeed\', \'linkedin\', \'glassdoor\', \'google\']`\n"
         response += "- **For specific regions**: Include regional sites like 'bayt', 'naukri', 'bdjobs'\n"
         response += "- **Rate limiting**: LinkedIn is most restrictive, Indeed is most reliable\n"
         

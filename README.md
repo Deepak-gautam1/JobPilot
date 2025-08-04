@@ -40,18 +40,18 @@ pip install mcp>=1.1.0 python-jobspy>=1.1.82 pandas>=2.1.0 pydantic>=2.0.0
 ### Run with uv (Recommended)
 ```bash
 # Development mode with auto-reload
-uv run mcp dev server.py
+uv run mcp dev -m jobspy_mcp_server
 
 # Production mode
-uv run mcp run server.py
+uv run mcp run -m jobspy_mcp_server
 
 # Direct execution
-uv run python server.py
+uv run python -m jobspy_mcp_server
 ```
 
 ### Run with Python
 ```bash
-python server.py
+python -m jobspy_mcp_server
 ```
 
 ### Install in Claude Desktop
@@ -65,19 +65,30 @@ Add to your Claude Desktop configuration file:
   "mcpServers": {
     "jobspy": {
       "command": "uv",
-      "args": ["run", "python", "/full/path/to/jobspy-mcp-server/server.py"]
+      "args": ["run", "jobspy-mcp-server"]
     }
   }
 }
 ```
 
-Alternative configuration:
+Alternative configuration (if installed globally):
+```json
+{
+  "mcpServers": {
+    "jobspy": {
+      "command": "jobspy-mcp-server"
+    }
+  }
+}
+```
+
+Alternative configuration (direct Python execution):
 ```json
 {
   "mcpServers": {
     "jobspy": {
       "command": "python",
-      "args": ["/full/path/to/jobspy-mcp-server/server.py"]
+      "args": ["-m", "jobspy_mcp_server"]
     }
   }
 }
@@ -200,6 +211,12 @@ uv run pytest
 # With pip
 pip install pytest
 pytest
+
+# Run specific tests
+uv run pytest test_jobspy_mcp.py -v
+
+# Run integration tests only
+uv run pytest test_jobspy_mcp.py::TestJobSpyIntegration -v
 ```
 
 ## 🤝 Contributing
@@ -246,8 +263,20 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## 🚀 Quick Start
 
 1. Install: `uv sync`
-2. Test: `uv run mcp dev server.py`  
-3. Configure Claude Desktop with the server path
+2. Test: `uv run mcp dev -m jobspy_mcp_server`  
+3. Configure Claude Desktop with the server
+
+## 🐍 Direct Python Execution
+
+After installation, you can also run the server directly:
+
+```bash
+# Run with Python module syntax
+python -m jobspy_mcp_server
+
+# Run with uv
+uv run python -m jobspy_mcp_server
+```
 4. Ask Claude: "Find me remote Python jobs using JobSpy"
 
 Happy job hunting! 🎯

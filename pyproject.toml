@@ -38,7 +38,7 @@ dev = [
 ]
 
 [project.scripts]
-jobspy-mcp-server = "server:main"
+jobspy-mcp-server = "jobspy_mcp_server:main"
 
 [tool.black]
 line-length = 88
