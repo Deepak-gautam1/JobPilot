@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "jobspy": {
+      "command": "python3",
+      "args": [
+        "/Users/chin/claude-desktop/jobspy-mcp-server/server.py"
+      ],
+      "env": {
+        "PYTHONPATH": "/Users/chin/claude-desktop/jobspy-mcp-server"
+      }
+    }
+  }
+}
