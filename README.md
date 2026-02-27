@@ -1,282 +1,218 @@
-# JobSpy MCP Server
+---
 
-A modern MCP (Model Context Protocol) server that provides job scraping capabilities using the JobSpy library. Built with the latest FastMCP framework for seamless integration with Claude Desktop and other MCP clients.
+```markdown
+# JobPilot 🤖
+> Automated job hunting pipeline — scrapes 7+ platforms nightly, scores jobs against your resume, and delivers a curated digest to Gmail at 8PM every night.
 
-## 🚀 Features
+Built because I was applying to 10 jobs one day and ghosting myself for 3 days straight. No discipline. No system. Just chaos. So I automated it.
 
-- **Multi-site job scraping**: Search across 8 major job boards (LinkedIn, Indeed, Glassdoor, ZipRecruiter, Google Jobs, Bayt, Naukri, BDJobs)
-- **Advanced filtering**: Filter by job type, location, posting date, remote work, salary range, and more
-- **Real-time progress**: Get live updates during job searches with progress indicators
-- **Rich formatting**: Beautifully formatted job results with all relevant details
-- **Modern MCP implementation**: Built with FastMCP for 2025 MCP protocol compliance
-- **Error handling**: Robust error handling with informative messages
-- **Comprehensive tools**: Multiple tools for job searching, country/site information, and search tips
+---
 
-## 📦 Installation
+## What It Does
 
-### Prerequisites
-- Python 3.10 or higher
-- uv (recommended) or pip
+Every night at 8PM, JobPilot automatically:
 
-### Quick Install
-```bash
-# Clone or download the project
-cd jobspy-mcp-server
+1. **Scrapes 7+ platforms** — Indeed, Naukri, LinkedIn, Google Jobs, Lever, Greenhouse, Amazon Jobs direct API
+2. **Scores every job against your resume** — 30-skill profile with regex word-boundary matching (no false positives)
+3. **Kills senior roles** — 47-pattern regex blocks "3+ years", "senior", "lead", "staff", "principal" automatically
+4. **Enforces salary floor** — ₹15L/yr for India, $22K/yr for Remote/Singapore
+5. **Sends a beautiful HTML email digest** — job cards with skill match bar, salary, source, urgency badge
+6. **Tracks everything** in SQLite — applied status, interview stage, follow-up reminders after 7 days
 
-# Install with uv (recommended)
-uv sync
+---
 
-# Or install with pip
-pip install -e .
+## Claude + MCP Integration 🤖
+
+Built two custom MCP (Model Context Protocol) servers:
+
+- **Gmail MCP** — gives Claude read access to your Gmail
+- **JobSpy MCP** — gives Claude job search capabilities
+
+Connect both in Claude Desktop and ask in plain English:
+
+> "How many jobs did I apply to this week?"
+> "Did Meesho or Razorpay respond?"
+> "Which applications are pending after 7 days?"
+> "Mark the Dropbox application as Interview stage"
+
+Claude reads your confirmation emails, parses them, and auto-registers each application into SQLite. No spreadsheet. No manual entry.
+
+---
+
+## Stack
+
+| Tool                                       | Purpose                              |
+| ------------------------------------------ | ------------------------------------ |
+| [JobSpy](https://github.com/Bunsly/JobSpy) | Multi-platform job scraper           |
+| Claude + MCP                               | Natural language over Gmail + job DB |
+| SQLite                                     | Local job tracking database          |
+| Python + Task Scheduler                    | Fully automated nightly runs         |
+| Gmail SMTP                                 | HTML email delivery                  |
+
+---
+
+## Project Structure
+
+```text
+JobPilot/
+├── job_alert.py           # Main pipeline — scrape, filter, score, email
+├── database.py            # SQLite operations — single source of truth
+├── company_scraper.py     # Lever + Greenhouse + Amazon Jobs direct APIs
+├── update_applied.py      # CLI tool — mark applied, update stages, add notes
+├── .env.example           # Credential template
+├── requirements.txt       # Dependencies
+└── README.md
+
 ```
 
-### Install Dependencies Manually
-```bash
-pip install mcp>=1.1.0 python-jobspy>=1.1.82 pandas>=2.1.0 pydantic>=2.0.0
-```
+---
 
-## 🔧 Usage
+## Setup
 
-### Run with uv (Recommended)
-```bash
-# Development mode with auto-reload
-uv run mcp dev -m jobspy_mcp_server
-
-# Production mode
-uv run mcp run -m jobspy_mcp_server
-
-# Direct execution
-uv run python -m jobspy_mcp_server
-```
-
-### Run with Python
-```bash
-python -m jobspy_mcp_server
-```
-
-### Install in Claude Desktop
-Add to your Claude Desktop configuration file:
-
-**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-**Windows**: `%APPDATA%/Claude/claude_desktop_config.json`
-
-```json
-{
-  "mcpServers": {
-    "jobspy": {
-      "command": "uv",
-      "args": ["run", "jobspy-mcp-server"]
-    }
-  }
-}
-```
-
-Alternative configuration (if installed globally):
-```json
-{
-  "mcpServers": {
-    "jobspy": {
-      "command": "jobspy-mcp-server"
-    }
-  }
-}
-```
-
-Alternative configuration (direct Python execution):
-```json
-{
-  "mcpServers": {
-    "jobspy": {
-      "command": "python",
-      "args": ["-m", "jobspy_mcp_server"]
-    }
-  }
-}
-```
-
-## 🛠️ Available Tools
-
-### 1. `scrape_jobs_tool`
-Search for jobs across multiple job boards with comprehensive filtering options.
-
-**Parameters:**
-- `search_term` (required): Job keywords (e.g., "software engineer", "data scientist")
-- `location`: Job location (e.g., "San Francisco, CA", "Remote")
-- `site_name`: List of job boards to search (default: ["indeed", "linkedin", "zip_recruiter", "google"])
-- `results_wanted`: Number of results (1-1000, default: 15)
-- `job_type`: Employment type ("fulltime", "parttime", "internship", "contract")
-- `is_remote`: Filter remote jobs only (default: false)
-- `hours_old`: Filter by posting recency in hours
-- `distance`: Search radius in miles (1-100, default: 50)
-- `easy_apply`: Filter jobs with easy apply (default: false)
-- `country_indeed`: Country for Indeed/Glassdoor (default: "usa")
-- `linkedin_fetch_description`: Get full LinkedIn descriptions (slower, default: false)
-- `offset`: Pagination offset (default: 0)
-- `verbose`: Logging level (0-2, default: 1)
-
-### 2. `get_supported_countries`
-Get the complete list of supported countries for job searches.
-
-### 3. `get_supported_sites`
-Get detailed information about all supported job board sites.
-
-### 4. `get_job_search_tips`
-Get comprehensive tips and best practices for effective job searching.
-
-## 💡 Example Queries
-
-Ask Claude:
-
-> "Find me 25 remote Python developer jobs from Indeed and LinkedIn"
-
-> "Search for data scientist positions in San Francisco posted in the last 48 hours"
-
-> "Look for entry-level marketing jobs in New York with easy apply options"
-
-> "Show me all supported job sites and their descriptions"
-
-> "Give me tips for searching software engineering jobs effectively"
-
-## 🌍 Supported Job Boards
-
-- **LinkedIn**: Professional networking platform (rate limited)  
-- **Indeed**: Largest job search engine (most reliable)
-- **Glassdoor**: Jobs with company reviews and salaries
-- **ZipRecruiter**: Job matching for US/Canada
-- **Google Jobs**: Aggregated job listings  
-- **Bayt**: Middle East job portal
-- **Naukri**: India's leading job portal
-- **BDJobs**: Bangladesh job portal
-
-## 🌎 Supported Countries
-
-The server supports 50+ countries including:
-- USA, Canada, UK, Australia
-- Germany, France, Spain, Italy
-- India, Singapore, Japan, South Korea
-- And many more...
-
-Use `get_supported_countries` tool for the complete list.
-
-## 🚨 Rate Limiting & Best Practices
-
-- **LinkedIn**: Most restrictive, use sparingly
-- **Indeed**: Most reliable, good for large searches
-- **Start small**: Begin with 10-15 results
-- **Use filtering**: Leverage job_type, hours_old, is_remote filters
-- **Be specific**: Use targeted search terms for better results
-
-## 🔍 Advanced Search Examples
-
-### Remote Software Jobs
-```json
-{
-  "search_term": "software engineer",
-  "location": "Remote", 
-  "is_remote": true,
-  "site_name": ["indeed", "zip_recruiter"],
-  "results_wanted": 20
-}
-```
-
-### Recent Data Science Jobs
-```json
-{
-  "search_term": "data scientist",
-  "location": "San Francisco, CA",
-  "hours_old": 48,
-  "site_name": ["linkedin", "glassdoor"],
-  "linkedin_fetch_description": true
-}
-```
-
-### Entry Level Positions
-```json
-{
-  "search_term": "junior developer",
-  "job_type": "fulltime",
-  "easy_apply": true,
-  "site_name": ["indeed", "zip_recruiter"],
-  "results_wanted": 30
-}
-```
-
-## 🧪 Testing
-
-Run the test suite:
-```bash
-# With uv
-uv run pytest
-
-# With pip
-pip install pytest
-pytest
-
-# Run specific tests
-uv run pytest test_jobspy_mcp.py -v
-
-# Run integration tests only
-uv run pytest test_jobspy_mcp.py::TestJobSpyIntegration -v
-```
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🔧 Troubleshooting
-
-### Common Issues
-
-**"Module not found" errors**
-- Ensure all dependencies are installed: `uv sync` or `pip install -e .`
-
-**"No results found"**
-- Try broader search terms
-- Check different job boards
-- Verify location spelling
-
-**Rate limiting/blocking**
-- Reduce `results_wanted` parameter
-- Use different job boards (avoid LinkedIn for large searches)
-- Add delays between searches
-
-**Claude Desktop not detecting tools**
-- Verify configuration file path and JSON syntax
-- Restart Claude Desktop after configuration changes
-- Check server logs for errors
-
-### Getting Help
-
-1. Check the comprehensive `get_job_search_tips` tool
-2. Review the example queries above
-3. Start with small searches and expand gradually
-4. Use verbose logging (`verbose=2`) for debugging
-
-## 🚀 Quick Start
-
-1. Install: `uv sync`
-2. Test: `uv run mcp dev -m jobspy_mcp_server`  
-3. Configure Claude Desktop with the server
-
-## 🐍 Direct Python Execution
-
-After installation, you can also run the server directly:
+### 1. Clone and install
 
 ```bash
-# Run with Python module syntax
-python -m jobspy_mcp_server
+git clone [https://github.com/Deepak-gautam1/JobPilot.git](https://github.com/Deepak-gautam1/JobPilot.git)
+cd JobPilot
+python -m venv venv
+venv\Scripts\activate        # Windows
+pip install -r requirements.txt
 
-# Run with uv
-uv run python -m jobspy_mcp_server
 ```
-4. Ask Claude: "Find me remote Python jobs using JobSpy"
 
-Happy job hunting! 🎯
+### 2. Configure credentials
+
+```bash
+cp .env.example .env
+
+```
+
+Edit `.env`:
+
+```env
+GMAIL_USER=your_gmail@gmail.com
+GMAIL_PASSWORD=your_16_char_app_password
+TO_EMAIL=your_gmail@gmail.com
+
+```
+
+_Get Gmail App Password: Google Account → Security → 2FA → App Passwords_
+
+### 3. Configure your resume
+
+Edit `job_alert.py`:
+
+```python
+MY_SKILLS = [
+    "python", "react", "fastapi", ...   # your actual skills
+]
+ROLES = [
+    "software engineer",
+    "full stack developer",             # your target roles
+    ...
+]
+INDIA_LOCATIONS = [
+    {"location": "Bangalore, India", ...},   # your target cities
+]
+MIN_SALARY_INR = 1500000    # ₹15L/yr — adjust to your floor
+
+```
+
+### 4. Run manually
+
+```bash
+python job_alert.py
+
+```
+
+### 5. Schedule nightly (Windows)
+
+```text
+Task Scheduler → Create Task
+  Trigger : Daily at 8:00 PM
+  Action  : python C:\full\path\to\job_alert.py
+  Start in: C:\full\path\to\JobPilot\
+
+```
+
+---
+
+## CLI Tracker
+
+After receiving your email and applying to jobs:
+
+```bash
+python update_applied.py
+
+```
+
+```text
+=== Job Application Tracker ===
+1. Review pending jobs      ← mark applied/not applied
+2. Update stages            ← OA / Interview / Offer / Rejected
+3. Both
+
+```
+
+---
+
+## Email Preview
+
+Each job card shows:
+
+- Title, Company, Location
+- Resume match % with visual bar (green/orange/red)
+- Salary (if listed)
+- Source platform + posted date
+- Direct Apply button
+- Weekly summary stats
+- Follow-up reminders for applications with no response in 7 days
+
+---
+
+## Known Limitations
+
+- Glassdoor blocks Indian city searches (400 errors) — excluded by design
+- LinkedIn rate limits description fetching — handled with delays
+- FAANG portals change structure frequently — Amazon Jobs API used directly
+- Task Scheduler requires PC to be on at 8PM
+
+---
+
+## What I Learned Building This
+
+- "3 years experience" appears 47 different ways in job descriptions
+- Every scraper fix reveals a new bug
+- MCP protocol makes Claude genuinely useful as a personal assistant
+- Automating the boring part makes the important part (actually applying) much easier to stay consistent with
+
+---
+
+## License
+
+MIT — use it, modify it, make it your own.
+
+Built by **Deepak Gautam** — NIT Kurukshetra
+
+Shoutout to **CampusX** for the MCP lectures 🙏
+
+---
+
+## What's Different From the Old README
+
+| Old (chinpeerapat base)        | New (your actual project)                |
+| ------------------------------ | ---------------------------------------- |
+| Generic JobSpy MCP server docs | Your specific pipeline documented        |
+| No setup for Indian job market | ₹15L floor, Indian cities, Naukri config |
+| No email system documented     | Full Gmail digest explained              |
+| No tracking system             | SQLite + update_applied.py CLI           |
+| No Claude integration details  | Gmail MCP + natural language queries     |
+| Example JSON queries           | Actual conversation examples             |
+
+```
+
+***
+
+This is going to look incredibly clean when recruiters land on your repo. Would you like me to help you write a `.gitignore` file so you don't accidentally push your SQLite database or `.env` credentials to the public repository?
+
+```

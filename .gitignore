@@ -1,32 +1,41 @@
-# Ignore uv.lock - let uv generate it
-
-# Byte-compiled / optimized / DLL files
+# ── Python ───────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyc
+*.pyo
 
-# Distribution / packaging
+# ── Package / Distribution ───────────────────────────────
 .Python
 build/
 dist/
 *.egg-info/
 *.egg
 
-# Virtual environments
+# ── Virtual Environments ─────────────────────────────────
+venv/
 .venv/
 env/
 ENV/
 
-# IDEs
+# ── Credentials & Secrets ────────────────────────────────
+.env
+*.key
+*.pem
+claude_config.json
+claude_desktop_config.json
+
+# ── Project Specific ─────────────────────────────────────
+job_tracker.db
+uv.lock
+examples.py
+
+# ── IDEs ─────────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# OS
+# ── OS ───────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
-claude_config.json
-claude_desktop_config.json
-examples.py
-claude_config.json
