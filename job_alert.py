@@ -19,9 +19,14 @@ sys.stderr.reconfigure(encoding='utf-8')
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 # ── CONFIG ───────────────────────────────────────────────
-GMAIL_USER     = "deepakgautam2647@gmail.com"
-GMAIL_PASSWORD = "nxoj dmfs lxnc pjuw"
-TO_EMAIL       = "deepakgautam2647@gmail.com"
+import os
+from dotenv import load_dotenv
+load_dotenv()
+
+GMAIL_USER     = os.getenv("GMAIL_USER")
+GMAIL_PASSWORD = os.getenv("GMAIL_PASSWORD")
+TO_EMAIL       = os.getenv("TO_EMAIL")
+
 
 # ── RESUME SKILLS ────────────────────────────────────────
 MY_SKILLS = [
@@ -33,10 +38,10 @@ MY_SKILLS = [
     "generative ai", "gpt", "ai", "machine learning",
 ]
 
+
 # ── ROLES ────────────────────────────────────────────────
 ROLES = [
     "software engineer",
-    "full stack developer",
     "machine learning engineer",
     "AI engineer",
     "backend developer python",
@@ -50,38 +55,42 @@ FAANG_SEARCHES = [
     "software engineer Goldman Sachs Bangalore",
 ]
 
-ALL_ROLES = ROLES  # FAANG searches use their own location loop below
+ALL_ROLES = ROLES
+
 
 # ── LOCATIONS ────────────────────────────────────────────
+# In job_alert.py INDIA_LOCATIONS — remove glassdoor
 INDIA_LOCATIONS = [
-    {"location": "Gurugram, India",  "country_indeed": "india", "sites": ["indeed", "google", "naukri"], "hours_old": 72},
-    {"location": "Bangalore, India", "country_indeed": "india", "sites": ["indeed", "google", "naukri"], "hours_old": 72},
-    {"location": "Mumbai, India",    "country_indeed": "india", "sites": ["indeed", "google", "naukri" ], "hours_old": 72},
-    {"location": "Pune, India",      "country_indeed": "india", "sites": ["indeed", "google", "naukri" ], "hours_old": 72},
-    {"location": "Chennai, India",   "country_indeed": "india", "sites": ["indeed", "google", "naukri" ], "hours_old": 72},
+    {"location": "Gurugram, India",  "country_indeed": "india", "sites": ["indeed", "google"], "hours_old": 72},
+    {"location": "Bangalore, India", "country_indeed": "india", "sites": ["indeed", "google"], "hours_old": 72},
+    {"location": "Mumbai, India",    "country_indeed": "india", "sites": ["indeed", "google"], "hours_old": 72},
+    {"location": "Pune, India",      "country_indeed": "india", "sites": ["indeed", "google"], "hours_old": 72},
+    {"location": "Chennai, India",   "country_indeed": "india", "sites": ["indeed", "google"], "hours_old": 72},
 ]
+
 FOREIGN_LOCATIONS = [
-    {"location": "Remote",           "country_indeed": "usa",       "sites": ["indeed", "google", "linkedin"], "hours_old": 24},
-    {"location": "Singapore",        "country_indeed": "singapore", "sites": ["indeed", "google", "linkedin"], "hours_old": 24},
+    {"location": "Remote",     "country_indeed": "usa",       "sites": ["indeed", "google", "linkedin"], "hours_old": 24},
+    {"location": "Singapore",  "country_indeed": "singapore", "sites": ["indeed", "google", "linkedin"], "hours_old": 24},
 ]
 FAANG_LOCATIONS = [
     {"location": "Bangalore, India", "country_indeed": "india", "sites": ["indeed", "google", "linkedin"], "hours_old": 72},
     {"location": "Hyderabad, India", "country_indeed": "india", "sites": ["indeed", "google", "linkedin"], "hours_old": 72},
 ]
-# LinkedIn-only India searches (separate because LinkedIn ignores country_indeed)
 LINKEDIN_INDIA_LOCATIONS = [
-    {"location": "Gurugram, India",   "country_indeed": "india", "sites": ["linkedin"], "hours_old": 72},
-    {"location": "Bangalore, India",  "country_indeed": "india", "sites": ["linkedin"], "hours_old": 72},
-    {"location": "Mumbai, India",     "country_indeed": "india", "sites": ["linkedin"], "hours_old": 72},
-    {"location": "Pune, India",       "country_indeed": "india", "sites": ["linkedin"], "hours_old": 72},
-    {"location": "Chennai, India",    "country_indeed": "india", "sites": ["linkedin"], "hours_old": 72},
-    {"location": "Hyderabad, India",  "country_indeed": "india", "sites": ["linkedin"], "hours_old": 72},
+    {"location": "Gurugram, India",  "country_indeed": "india", "sites": ["linkedin"], "hours_old": 72},
+    {"location": "Bangalore, India", "country_indeed": "india", "sites": ["linkedin"], "hours_old": 72},
+    {"location": "Mumbai, India",    "country_indeed": "india", "sites": ["linkedin"], "hours_old": 72},
+    {"location": "Pune, India",      "country_indeed": "india", "sites": ["linkedin"], "hours_old": 72},
+    {"location": "Chennai, India",   "country_indeed": "india", "sites": ["linkedin"], "hours_old": 72},
+    {"location": "Hyderabad, India", "country_indeed": "india", "sites": ["linkedin"], "hours_old": 72},
 ]
 
+
 # ── SALARY MINIMUMS ──────────────────────────────────────
-MIN_SALARY_USD = 22000
-MIN_SALARY_INR = 1500000
-MIN_SKILL_SCORE = 5   # reject jobs with 0 matching skills entirely
+MIN_SALARY_USD  = 22000
+MIN_SALARY_INR  = 1500000
+MIN_SKILL_SCORE = 5
+
 
 # ── EXPERIENCE FILTERS ───────────────────────────────────
 SENIOR_TITLE_KEYWORDS = [
@@ -106,6 +115,7 @@ OVEREXP_DESC_KEYWORDS = [
 
 RESULTS_PER_SEARCH = 10
 
+
 # ── PRE-COMPILE REGEX ────────────────────────────────────
 DIGIT_EXP_RE = re.compile(
     r'\b([2-9]|1[0-5])\s*(?:\+|-\s*\d+|\s+to\s+\d+)?\s*'
@@ -120,10 +130,8 @@ NAUKRI_EXP_SINGLE_RE = re.compile(r'-(\d+)-year')
 
 
 # ── HELPERS ──────────────────────────────────────────────
-
-# Skills that need word-boundary matching to avoid false positives
-# e.g. "ai" matches inside "training", "detail"; "gpt" matches inside "Egypt"
 _BOUNDARY_SKILLS = {"ai", "gpt", "sql", "git", "rag", "llm"}
+
 
 def skill_match_score(job):
     text = " ".join([
@@ -133,7 +141,6 @@ def skill_match_score(job):
     matched = []
     for s in MY_SKILLS:
         if s in _BOUNDARY_SKILLS:
-            # Use word boundary so "ai" doesn't match "training"
             if re.search(rf'\b{re.escape(s)}\b', text):
                 matched.append(s)
         else:
@@ -145,14 +152,15 @@ def skill_match_score(job):
 def salary_ok(job):
     min_amt  = job.get("min_amount")
     currency = str(job.get("currency", "USD")).upper()
+    region   = str(job.get("region", "")).lower()
     try:
         if pd.isna(min_amt):
-            return False
+            return region == "india"
+        if currency == "INR":
+            return float(min_amt) >= MIN_SALARY_INR
+        return float(min_amt) >= MIN_SALARY_USD
     except (TypeError, ValueError):
-        return False
-    if currency == "INR":
-        return float(min_amt) >= MIN_SALARY_INR
-    return float(min_amt) >= MIN_SALARY_USD
+        return region == "india"
 
 
 def is_entry_level(job):
@@ -161,27 +169,16 @@ def is_entry_level(job):
     level = str(job.get("job_level", "")).lower()
     url   = str(job.get("job_url", "")).lower()
 
-    # 1. Hard exclude senior titles
     if any(kw in title for kw in SENIOR_TITLE_KEYWORDS):
         return False
-
-    # 2. Hard exclude job_level field
     if any(kw in level for kw in ["senior", "mid-senior", "director", "manager", "lead"]):
         return False
-
-    # 3. Hard exclude keyword list in description
     if any(kw in desc for kw in OVEREXP_DESC_KEYWORDS):
         return False
-
-    # 4. Regex: digits 2-15 tied to experience
     if DIGIT_EXP_RE.search(desc):
         return False
-
-    # 5. Regex: spelled-out numbers tied to experience
     if WORD_EXP_RE.search(desc):
         return False
-
-    # 6. Naukri URL experience check
     if "naukri.com" in url:
         m = NAUKRI_EXP_RANGE_RE.search(url)
         if m and int(m.group(1)) >= 2:
@@ -189,7 +186,6 @@ def is_entry_level(job):
         m2 = NAUKRI_EXP_SINGLE_RE.search(url)
         if m2 and int(m2.group(1)) >= 2:
             return False
-
     return True
 
 
@@ -233,20 +229,18 @@ def fetch_jobs_for_location(role, loc_config, fetch_linkedin_desc=False, retries
 
 
 # ── MAIN FETCH ───────────────────────────────────────────
-
 def fetch_top_jobs():
     india_dfs   = []
     foreign_dfs = []
     seen_combos = set()
     run_start   = time.time()
 
-    # ── Load all seen hashes ONCE into memory ──────────────────
     seen_hashes = get_all_seen_hashes()
     print(f"🗃️  Loaded {len(seen_hashes)} seen job hashes from DB")
 
-    # ── Regular role searches: Indeed + Naukri + Glassdoor ──
+    # ── FIX 3a: updated section label (Naukri moved to RSS scraper) ──
     t0 = time.time()
-    print("\n🔍 [1/4] Regular searches (Indeed / Naukri / Glassdoor)...")
+    print("\n🔍 [1/4] Regular searches (Indeed / Glassdoor / Google)...")
     for role in ALL_ROLES:
         for loc in INDIA_LOCATIONS:
             print(f"  India: {role} @ {loc['location']}...")
@@ -273,7 +267,6 @@ def fetch_top_jobs():
             time.sleep(5)
     print(f"⏱️  Section done in {(time.time()-t0)/60:.1f} min")
 
-    # ── FAANG targeted searches ───────────────────────────
     t0 = time.time()
     print("\n🏢 [2/4] FAANG searches (Bangalore + Hyderabad)...")
     for role in FAANG_SEARCHES:
@@ -288,10 +281,9 @@ def fetch_top_jobs():
             time.sleep(5)
     print(f"⏱️  Section done in {(time.time()-t0)/60:.1f} min")
 
-    # ── LinkedIn India searches ──────────────────────────────
+    # ── FIX 4: removed duplicate comment line ──
     t0 = time.time()
-    print("\n🔵 [3/4] LinkedIn India searches (fast pass, then top-40 desc fetch)...")
-    linkedin_dfs = []
+    print("\n🔵 [3/4] LinkedIn India searches (with descriptions)...")
     for role in ALL_ROLES:
         for loc in LINKEDIN_INDIA_LOCATIONS:
             print(f"  LinkedIn IN: {role} @ {loc['location']}...")
@@ -299,47 +291,11 @@ def fetch_top_jobs():
             if not df.empty:
                 df["searched_role"] = role
                 df["region"]        = "india"
-                india_dfs.append(df)   # ← goes directly into main india pool
+                india_dfs.append(df)
                 print(f"     {len(df)} results")
             time.sleep(8)
-
-    if linkedin_dfs:
-        li_combined = pd.concat(linkedin_dfs, ignore_index=True)
-        li_combined = li_combined.drop_duplicates(subset=["job_url"], keep="first")
-        li_combined = li_combined[li_combined.apply(is_entry_level, axis=1)]
-        # Quick title-only skill score to pick top candidates
-        li_combined["skill_score"] = li_combined.apply(
-            lambda j: skill_match_score(j)[0], axis=1
-        )
-        top_li = li_combined.sort_values("skill_score", ascending=False).head(40)
-        print(f"  Fetching full descriptions for top {len(top_li)} LinkedIn candidates...")
-        # Now fetch descriptions only for those top 40
-        enriched_rows = []
-        for _, row in top_li.iterrows():
-            loc_cfg = {"location": str(row.get("location", "India")),
-                       "country_indeed": "india",
-                       "sites": ["linkedin"],
-                       "hours_old": 72}
-            df_single = fetch_jobs_for_location(
-                str(row.get("searched_role", "software engineer")),
-                loc_cfg, fetch_linkedin_desc=True
-            )
-            if not df_single.empty:
-                # Match back by job_url
-                match = df_single[df_single["job_url"] == row["job_url"]]
-                if not match.empty:
-                    enriched_rows.append(match.iloc[0].to_dict())
-                    continue
-            enriched_rows.append(row.to_dict())  # fallback: keep original
-            time.sleep(3)
-        if enriched_rows:
-            li_enriched = pd.DataFrame(enriched_rows)
-            li_enriched["region"] = "india"
-            india_dfs.append(li_enriched)
-            print(f"  ✅ {len(li_enriched)} LinkedIn jobs enriched")
     print(f"⏱️  Section done in {(time.time()-t0)/60:.1f} min")
 
-    # ── Process JobSpy results ───────────────────────────
     def process(dfs):
         if not dfs:
             return pd.DataFrame()
@@ -348,10 +304,13 @@ def fetch_top_jobs():
         combined = combined[combined.apply(salary_ok, axis=1)]
         combined = combined[combined.apply(is_entry_level, axis=1)]
         combined["skill_score"] = combined.apply(lambda j: skill_match_score(j)[0], axis=1)
-        combined = combined[combined["skill_score"] >= MIN_SKILL_SCORE]   # ← ADD THIS
+        combined = combined[combined["skill_score"] >= MIN_SKILL_SCORE]
+        if "max_amount" in combined.columns:
+            combined["max_amount"] = pd.to_numeric(combined["max_amount"], errors="coerce").fillna(0)
+        else:
+            combined["max_amount"] = 0
         combined = combined.sort_values(["skill_score", "max_amount"], ascending=[False, False])
         return combined
-
 
     india_final   = process(india_dfs)
     foreign_final = process(foreign_dfs)
@@ -361,23 +320,23 @@ def fetch_top_jobs():
     print(f"\n🇮🇳 India jobs selected:   {len(top_india)}")
     print(f"🌍 Foreign jobs selected: {len(top_foreign)}")
 
-    # ── Direct career pages: Amazon + Lever + Greenhouse ──
+    # ── FIX 3b: updated section label + FIX 1: head(10) ──
     t0 = time.time()
-    print("\n🏢 [4/4] Direct career pages (Amazon / Lever / Greenhouse)...")
+    print("\n🏢 [4/4] Direct career pages (Amazon · Lever · Greenhouse · Naukri RSS · Instahyre · Hirist · Wellfound)...")
     company_df = fetch_all_company_jobs()
     if not company_df.empty:
         company_df["from_company_scraper"] = True
         company_df = company_df[company_df.apply(is_entry_level, axis=1)]
         company_df["skill_score"] = company_df.apply(lambda j: skill_match_score(j)[0], axis=1)
-        company_df=company_df[company_df["skill_score"] >= MIN_SKILL_SCORE]   # ← ADD THIS
-        top_company = company_df.sort_values("skill_score", ascending=False).head(5)
+        company_df = company_df[company_df["skill_score"] >= MIN_SKILL_SCORE]
+        # FIX 1: increased from head(5) → head(10) for 6 sources now
+        top_company = company_df.sort_values("skill_score", ascending=False).head(10)
         print(f"  {len(top_company)} company jobs after filter")
     else:
         top_company = pd.DataFrame()
         print("  No company jobs found")
     print(f"⏱️  Section done in {(time.time()-t0)/60:.1f} min")
 
-    # ── Combine + deduplicate ─────────────────────────────
     all_parts = [x for x in [top_india, top_foreign, top_company] if not x.empty]
     if not all_parts:
         print("No jobs found from any source.")
@@ -399,7 +358,6 @@ def fetch_top_jobs():
 
 
 # ── EMAIL ────────────────────────────────────────────────
-
 def build_followup_section():
     """Build HTML section for jobs needing follow-up (applied 7+ days ago, no stage update)."""
     followups = get_followup_jobs(days=7)
@@ -481,6 +439,8 @@ def build_email_html(df):
     india_jobs   = df[df["region"] == "india"]   if "region" in df.columns else df
     foreign_jobs = df[df["region"] == "foreign"] if "region" in df.columns else pd.DataFrame()
 
+    # FIX 2: all keys lowercase — role_tag.strip().lower() lookup works correctly
+    # for both "AI engineer" (from ROLES) and "ai engineer" (from scrapers)
     role_colors = {
         "software engineer"        : ("#e8f5e9", "#1b5e20"),
         "full stack developer"     : ("#e3f2fd", "#0d47a1"),
@@ -493,9 +453,8 @@ def build_email_html(df):
     def make_cards(subset, flag):
         cards = ""
         for i, (_, job) in enumerate(subset.iterrows(), 1):
-            # Fix #11: escape all scraped strings before inserting into HTML
-            title     = html_module.escape(str(job.get("title", "N/A")))
-            company   = html_module.escape(str(job.get("company", "N/A")))
+            title     = html_module.escape(str(job.get("title",    "N/A")))
+            company   = html_module.escape(str(job.get("company",  "N/A")))
             location  = html_module.escape(str(job.get("location", "N/A") or "Remote"))
             is_direct = bool(job.get("from_company_scraper", False))
             source    = html_module.escape(str(job.get("site", "N/A")).title())
@@ -506,7 +465,6 @@ def build_email_html(df):
             currency  = str(job.get("currency", "USD")).upper()
             skill_sc  = float(job.get("skill_score", 0))
 
-            # Salary
             try:
                 if pd.notna(job.get("min_amount")) and pd.notna(job.get("max_amount")):
                     sym    = "Rs." if currency == "INR" else "$"
@@ -519,7 +477,6 @@ def build_email_html(df):
                 salary = "Salary not disclosed"
                 salary_color = "#999"
 
-            # Skill bar
             bar_color = "#4caf50" if skill_sc >= 50 else "#ff9800" if skill_sc >= 25 else "#f44336"
             skill_bar = f"""
             <div style="margin:6px 0 4px;">
@@ -535,7 +492,8 @@ def build_email_html(df):
                 '<span style="background:#fce4ec;color:#c62828;padding:3px 8px;border-radius:10px;font-size:11px;font-weight:bold;">On-site</span>'
             )
 
-            rbg, rclr = role_colors.get(role_tag.lower(), ("#f5f5f5", "#333"))
+            # FIX 2: use .strip().lower() so "AI engineer" → "ai engineer" matches dict key
+            rbg, rclr = role_colors.get(role_tag.strip().lower(), ("#f5f5f5", "#333"))
 
             apply_btn = (
                 f'<a href="{job_url}" style="display:inline-block;background:#1b5e20;color:white;'
@@ -563,18 +521,18 @@ def build_email_html(df):
             </div>"""
         return cards
 
-    india_cards   = make_cards(india_jobs,   "India")
-    foreign_cards = make_cards(foreign_jobs, "Foreign")
+    india_cards   = make_cards(india_jobs,   "🇮🇳")
+    foreign_cards = make_cards(foreign_jobs, "🌍")
 
     india_section = f"""
         <div style="background:#e8f5e9;border-radius:10px;padding:10px 14px;margin:16px 0 10px;">
-          <h2 style="margin:0;font-size:16px;color:#1b5e20;">India Jobs ({len(india_jobs)})</h2>
+          <h2 style="margin:0;font-size:16px;color:#1b5e20;">🇮🇳 India Jobs ({len(india_jobs)})</h2>
         </div>
         {india_cards}""" if not india_jobs.empty else ""
 
     foreign_section = f"""
         <div style="background:#e3f2fd;border-radius:10px;padding:10px 14px;margin:16px 0 10px;">
-          <h2 style="margin:0;font-size:16px;color:#0d47a1;">Foreign / Remote Jobs ({len(foreign_jobs)})</h2>
+          <h2 style="margin:0;font-size:16px;color:#0d47a1;">🌍 Foreign / Remote Jobs ({len(foreign_jobs)})</h2>
         </div>
         {foreign_cards}""" if not foreign_jobs.empty else ""
 
@@ -597,8 +555,9 @@ def build_email_html(df):
         {build_followup_section()}
         {india_section}
         {foreign_section}
+        <!-- FIX 5: updated footer to include all sources -->
         <div style="text-align:center;padding:14px;font-size:11px;color:#aaa;">
-          Resume-matched via JobSpy + Amazon + Lever + Greenhouse | {datetime.now().strftime("%I:%M %p")} IST
+          Resume-matched via JobSpy · Amazon · Lever · Greenhouse · Naukri RSS · Instahyre · Hirist · Wellfound | {datetime.now().strftime("%I:%M %p")} IST
         </div>
       </div>
     </body>
@@ -614,10 +573,8 @@ def send_email(html_body, job_count):
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(GMAIL_USER, GMAIL_PASSWORD)
         server.sendmail(GMAIL_USER, TO_EMAIL, msg.as_string())
-    print(f"Email sent at {datetime.now().strftime('%I:%M %p')}")
+    print(f"✅ Email sent at {datetime.now().strftime('%I:%M %p')}")
 
-
-# ── RUN ──────────────────────────────────────────────────
 
 def send_crash_email(error_msg):
     """Send a plain-text crash alert so you know when the script fails."""
@@ -636,6 +593,7 @@ def send_crash_email(error_msg):
         print(f"Could not send crash email: {e}")
 
 
+# ── RUN ──────────────────────────────────────────────────
 def run_job_alert():
     init_db()
 
@@ -647,12 +605,12 @@ def run_job_alert():
         df = fetch_top_jobs()
 
         saved = sum(1 for _, job in df.iterrows() if save_job(job, sent=True))
-        print(f"Saved {saved} new jobs to database")
+        print(f"💾 Saved {saved} new jobs to database")
 
         stats = get_stats()
-        print(f"DB Stats - Total: {stats['total']} | Applied: {stats['applied']} | Pending: {stats['pending']} | Skipped: {stats['skipped']}")
+        print(f"📊 DB Stats - Total: {stats['total']} | Applied: {stats['applied']} | Pending: {stats['pending']} | Skipped: {stats['skipped']}")
 
-        print(f"\nSending email with {len(df)} jobs...")
+        print(f"\n📧 Sending email with {len(df)} jobs...")
         html = build_email_html(df)
         send_email(html, len(df))
         print(f"{'='*52}\n")
@@ -660,7 +618,7 @@ def run_job_alert():
     except Exception as e:
         import traceback
         err = traceback.format_exc()
-        print(f"CRASH: {err}")
+        print(f"💥 CRASH: {err}")
         send_crash_email(err)
 
 
