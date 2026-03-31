@@ -1,6 +1,4 @@
----
 
-```markdown
 # JobPilot 🤖
 > Automated job hunting pipeline — scrapes 7+ platforms nightly, scores jobs against your resume, and delivers a curated digest to Gmail at 8PM every night.
 
