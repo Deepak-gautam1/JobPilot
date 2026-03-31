@@ -39,3 +39,8 @@ examples.py
 # ── OS ───────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+
+
+# .gitignore
+job_tracker_1.db
+.scrape_cache.json

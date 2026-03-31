@@ -5,6 +5,9 @@ on:
     - cron: "30 14 * * *" # 8 PM IST
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   run-jobpilot:
     runs-on: ubuntu-latest
@@ -14,14 +17,16 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.10"
 
       - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
+        run: pip install -r requirements.txt
 
       - name: Run JobPilot
-        run: |
-          python job_alert.py
+        run: python job_alert.py
+        env: # ← ADD THIS
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_PASSWORD: ${{ secrets.GMAIL_PASSWORD }}
+          TO_EMAIL: ${{ secrets.TO_EMAIL }}
