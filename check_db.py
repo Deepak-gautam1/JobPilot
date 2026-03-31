@@ -1,6 +1,8 @@
 import sqlite3
+import os
 
-conn = sqlite3.connect('job_tracker.db')
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "job_tracker.db")
+conn = sqlite3.connect(DB_PATH)
 c = conn.cursor()
 
 # Check tables

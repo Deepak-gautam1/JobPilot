@@ -1,16 +1,20 @@
+import os
 import sys
 import time
 import html as html_module
 import re
 import smtplib
 import warnings
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, date as date_type
 import pandas as pd
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from jobspy import scrape_jobs
-from datetime import datetime
-from database import init_db, save_job, is_already_seen, make_hash, get_stats, get_followup_jobs, get_weekly_stats, get_all_seen_hashes
+from database import init_db, save_job, make_hash, get_stats, get_followup_jobs, get_weekly_stats, get_all_seen_hashes
 from company_scraper import fetch_all_company_jobs
+from filters import is_entry_level as _filter_is_entry_level, is_safe_url, warmup_nli_model
 
 # Fix unicode/emoji encoding for Task Scheduler
 sys.stdout.reconfigure(encoding='utf-8')
@@ -19,13 +23,14 @@ sys.stderr.reconfigure(encoding='utf-8')
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 # ── CONFIG ───────────────────────────────────────────────
-import os
 from dotenv import load_dotenv
 load_dotenv()
 
 GMAIL_USER     = os.getenv("GMAIL_USER")
 GMAIL_PASSWORD = os.getenv("GMAIL_PASSWORD")
 TO_EMAIL       = os.getenv("TO_EMAIL")
+
+import scorer  # noqa: E402  — semantic scoring engine (scorer.py)
 
 
 # ── RESUME SKILLS ────────────────────────────────────────
@@ -48,18 +53,21 @@ ROLES = [
     "data engineer",
 ]
 
+# FAANG_SEARCHES: do NOT embed location names ("India", "Hyderabad") in the
+# search term — jobspy passes them to the country_indeed parser and may mis-
+# interpret them as country strings (causing "Invalid country: bolivia" errors
+# from fuzzy-matching). Location is handled separately via FAANG_LOCATIONS.
 FAANG_SEARCHES = [
-    "software engineer Google India",
-    "SDE Amazon India entry level",
-    "software engineer Microsoft Hyderabad",
-    "software engineer Goldman Sachs Bangalore",
+    "software engineer Google",
+    "SDE Amazon entry level",
+    "software engineer Microsoft",
+    "software engineer Goldman Sachs",
 ]
 
 ALL_ROLES = ROLES
 
 
 # ── LOCATIONS ────────────────────────────────────────────
-# In job_alert.py INDIA_LOCATIONS — remove glassdoor
 INDIA_LOCATIONS = [
     {"location": "Gurugram, India",  "country_indeed": "india", "sites": ["indeed", "google"], "hours_old": 72},
     {"location": "Bangalore, India", "country_indeed": "india", "sites": ["indeed", "google"], "hours_old": 72},
@@ -88,65 +96,179 @@ LINKEDIN_INDIA_LOCATIONS = [
 
 # ── SALARY MINIMUMS ──────────────────────────────────────
 MIN_SALARY_USD  = 22000
-MIN_SALARY_INR  = 1500000
+MIN_SALARY_INR  = 1200000
 MIN_SKILL_SCORE = 5
 
 
-# ── EXPERIENCE FILTERS ───────────────────────────────────
-SENIOR_TITLE_KEYWORDS = [
-    "senior", "sr.", " sr ", "lead", "staff", "principal",
-    "director", "head of", "vp ", "vice president", "manager",
-    "architect", "consultant", "specialist ii", "level iii",
-    "level 3", "level 4", "level 5",
-]
-
-OVEREXP_DESC_KEYWORDS = [
-    "3+ years", "4+ years", "5+ years", "6+ years", "7+ years",
-    "8+ years", "10+ years", "3 or more years", "4 or more years",
-    "minimum 3 years", "minimum 4 years", "minimum 5 years",
-    "at least 3 years", "at least 4 years", "at least 5 years",
-    "3 years of experience", "4 years of experience",
-    "5 years of experience", "6 years of experience",
-    "3-5 years", "4-6 years", "5-7 years", "5-8 years",
-    "3 to 5 years", "4 to 6 years", "5 to 7 years",
-    "experienced engineer", "seasoned engineer",
-    "proven track record of", "extensive experience",
-]
-
+# ── SEARCH CONFIG ────────────────────────────────────────
 RESULTS_PER_SEARCH = 10
+MAX_WORKERS        = 8   # concurrent HTTP threads — tune down if rate-limited
+# All filter constants and regexes live in filters.py — do not duplicate here.
+
+# Thread-safe print lock — prevents interleaved output from parallel workers
+_print_lock = threading.Lock()
+def tprint(*args, **kwargs):
+    with _print_lock:
+        print(*args, **kwargs)
 
 
-# ── PRE-COMPILE REGEX ────────────────────────────────────
-DIGIT_EXP_RE = re.compile(
-    r'\b([2-9]|1[0-5])\s*(?:\+|-\s*\d+|\s+to\s+\d+)?\s*'
-    r'(?:years?|yrs?)(?:\s+of)?\s*(?:relevant\s+|work\s+|professional\s+)?experience\b'
-)
-WORD_EXP_RE = re.compile(
-    r'\b(two|three|four|five|six|seven|eight|nine|ten)\s*'
-    r'(?:years?|yrs?)(?:\s+of)?\s*(?:relevant\s+|work\s+|professional\s+)?experience\b'
-)
-NAUKRI_EXP_RANGE_RE  = re.compile(r'-(\d+)-to-(\d+)-year')
-NAUKRI_EXP_SINGLE_RE = re.compile(r'-(\d+)-year')
+# ══ SCRAPE CACHE ────────────────────────────────────────────
+# File-based cache so repeated test runs don't re-scrape within the TTL.
+# Key = MD5 of (role, location, sites, hours_old). Value = {ts, rows_json}.
+# Descriptions are truncated to 2 KB before caching to keep the file small.
+import json as _json
+import hashlib as _hlib
+
+_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".scrape_cache.json")
+_CACHE_TTL  = 3600       # seconds — cache valid for 1 hour
+_cache_lock = threading.Lock()
 
 
-# ── HELPERS ──────────────────────────────────────────────
-_BOUNDARY_SKILLS = {"ai", "gpt", "sql", "git", "rag", "llm"}
+def _scrape_key(role: str, loc_config: dict, fetch_linkedin_desc: bool) -> str:
+    raw = "|".join([
+        role.lower(),
+        loc_config["location"].lower(),
+        ",".join(sorted(loc_config["sites"])),
+        str(loc_config.get("hours_old", 24)),
+        str(fetch_linkedin_desc),
+    ])
+    return _hlib.md5(raw.encode()).hexdigest()
 
 
-def skill_match_score(job):
-    text = " ".join([
-        str(job.get("title", "")),
-        str(job.get("description", "")),
-    ]).lower()
-    matched = []
-    for s in MY_SKILLS:
-        if s in _BOUNDARY_SKILLS:
-            if re.search(rf'\b{re.escape(s)}\b', text):
-                matched.append(s)
+def _cache_get(key: str) -> pd.DataFrame | None:
+    """Return cached DataFrame if key exists and is not expired, else None."""
+    with _cache_lock:
+        try:
+            with open(_CACHE_FILE, "r", encoding="utf-8") as f:
+                cache = _json.load(f)
+        except Exception:
+            return None
+        entry = cache.get(key)
+        if not entry or time.time() - entry["ts"] > _CACHE_TTL:
+            return None
+        try:
+            return pd.read_json(entry["data"], orient="records")
+        except Exception:
+            return None
+
+
+def _cache_set(key: str, df: pd.DataFrame) -> None:
+    """Store a scrape result. Truncates descriptions and evicts expired entries."""
+    with _cache_lock:
+        try:
+            try:
+                with open(_CACHE_FILE, "r", encoding="utf-8") as f:
+                    cache = _json.load(f)
+            except Exception:
+                cache = {}
+            # Truncate descriptions before storing (keeps file manageable)
+            d = df.copy()
+            if "description" in d.columns:
+                d["description"] = d["description"].fillna("").astype(str).str[:2000]
+            cache[key] = {"ts": time.time(), "data": d.to_json(orient="records")}
+            # Evict expired entries so the file doesn't grow unbounded
+            now = time.time()
+            cache = {k: v for k, v in cache.items() if now - v["ts"] <= _CACHE_TTL}
+            with open(_CACHE_FILE, "w", encoding="utf-8") as f:
+                _json.dump(cache, f)
+        except Exception:
+            pass  # cache write failure is always non-fatal
+
+
+# ══ FUZZY DEDUP ────────────────────────────────────────────
+# MD5 dedup only catches exact URL/title/company matches.
+# Fuzzy dedup catches near-duplicates: "Python Engineer" vs "Engineer (Python)"
+# at the same company. Operates on the current batch only (not DB — too slow).
+# Sorted by final_score first so the better-scored duplicate is always kept.
+
+def fuzzy_dedup(df: pd.DataFrame, threshold: int = 88) -> pd.DataFrame:
+    """
+    Remove near-duplicate jobs using token_sort_ratio on title+company.
+    Requires: pip install rapidfuzz   (skipped gracefully if not installed).
+    threshold=88: catches obvious rewrites; raise to 92 to be more conservative.
+    """
+    try:
+        from rapidfuzz.fuzz import token_sort_ratio
+    except ImportError:
+        return df  # optional dep — skip silently
+
+    if len(df) < 2:
+        return df
+
+    # Sort descending so the highest-scoring duplicate is always kept
+    score_col = "final_score" if "final_score" in df.columns else "skill_score"
+    df = df.sort_values(score_col, ascending=False).reset_index(drop=True)
+
+    # Build fingerprints: "title company"
+    fp = (
+        df.get("title",   pd.Series("", index=df.index)).fillna("").astype(str).str.lower()
+        + " "
+        + df.get("company", pd.Series("", index=df.index)).fillna("").astype(str).str.lower()
+    ).tolist()
+
+    keep, dropped = [], 0
+    for i, sig in enumerate(fp):
+        if any(token_sort_ratio(sig, fp[j]) >= threshold for j in keep):
+            dropped += 1
         else:
-            if s in text:
-                matched.append(s)
-    return round((len(matched) / len(MY_SKILLS)) * 100, 1), matched
+            keep.append(i)
+
+    if dropped:
+        tprint(f"🔀 Fuzzy dedup: removed {dropped} near-duplicate jobs")
+    return df.iloc[keep].reset_index(drop=True)
+
+
+# ── SKILL MATCHING ───────────────────────────────────────
+# Pre-compile one word-boundary regex per skill at import time.
+# Using \b for ALL skills fixes loose matches like "python" hitting "cpython".
+# Patterns are compiled once and reused across every batch call.
+_SKILL_PATTERNS: list[tuple[str, re.Pattern]] = [
+    (skill, re.compile(rf'\b{re.escape(skill)}\b', re.IGNORECASE))
+    for skill in MY_SKILLS
+]
+_SKILL_COUNT = len(MY_SKILLS)
+
+
+def batch_skill_scores(df: pd.DataFrame) -> pd.Series:
+    """
+    Vectorized skill scorer — processes all rows at once instead of row-by-row.
+
+    Strategy:
+      1. Concatenate title + description into one text column (vectorized).
+      2. For each skill regex, run Series.str.contains() across all rows at once.
+      3. Sum the boolean columns → hit count per row → percentage.
+
+    Returns a float Series (0.0–100.0) aligned with df's index.
+    """
+    # Build combined text column — fillna prevents NaN from breaking str ops
+    text = (
+        df.get("title",       pd.Series("", index=df.index)).fillna("").astype(str)
+        + " "
+        + df.get("description", pd.Series("", index=df.index)).fillna("").astype(str)
+    ).str.lower()
+
+    # One boolean column per skill, then sum → hit count per row
+    hits = sum(
+        text.str.contains(pattern, regex=True, na=False).astype(int)
+        for _, pattern in _SKILL_PATTERNS
+    )
+
+    return (hits / _SKILL_COUNT * 100).round(1)
+
+
+def skill_match_score(job) -> tuple[float, list[str]]:
+    """
+    Single-row scorer kept for backwards compatibility (MCP server, manual calls).
+    Returns (score_float, matched_skills_list).
+    """
+    text = (
+        str(job.get("title", "")) + " " + str(job.get("description", ""))
+    ).lower()
+    matched = [
+        skill for skill, pattern in _SKILL_PATTERNS
+        if pattern.search(text)
+    ]
+    return round(len(matched) / _SKILL_COUNT * 100, 1), matched
 
 
 def salary_ok(job):
@@ -155,57 +277,66 @@ def salary_ok(job):
     region   = str(job.get("region", "")).lower()
     try:
         if pd.isna(min_amt):
-            return region == "india"
+            # FIX: allow undisclosed salary for ALL regions, not just India.
+            # Most foreign/remote jobs on Indeed & Google don't include salary.
+            # Blocking them here eliminated ALL foreign results every run.
+            return True
         if currency == "INR":
             return float(min_amt) >= MIN_SALARY_INR
         return float(min_amt) >= MIN_SALARY_USD
     except (TypeError, ValueError):
-        return region == "india"
+        return True  # undisclosed → allow through, skill score will rank them lower
 
 
-def is_entry_level(job):
-    title = str(job.get("title", "")).lower()
-    desc  = str(job.get("description", "")).lower()
-    level = str(job.get("job_level", "")).lower()
-    url   = str(job.get("job_url", "")).lower()
-
-    if any(kw in title for kw in SENIOR_TITLE_KEYWORDS):
-        return False
-    if any(kw in level for kw in ["senior", "mid-senior", "director", "manager", "lead"]):
-        return False
-    if any(kw in desc for kw in OVEREXP_DESC_KEYWORDS):
-        return False
-    if DIGIT_EXP_RE.search(desc):
-        return False
-    if WORD_EXP_RE.search(desc):
-        return False
-    if "naukri.com" in url:
-        m = NAUKRI_EXP_RANGE_RE.search(url)
-        if m and int(m.group(1)) >= 2:
-            return False
-        m2 = NAUKRI_EXP_SINGLE_RE.search(url)
-        if m2 and int(m2.group(1)) >= 2:
-            return False
-    return True
+def is_entry_level(job) -> bool:
+    """Thin wrapper — delegates to filters.is_entry_level (single source of truth)."""
+    return _filter_is_entry_level(
+        title       = str(job.get("title", "")),
+        description = str(job.get("description", "")),
+        job_level   = str(job.get("job_level", "")),
+        job_url     = str(job.get("job_url", "")),
+    )
 
 
-def not_seen_filter(df, seen_hashes):
-    """Remove jobs already in DB using pre-loaded in-memory hash set."""
-    def not_seen(job):
-        h = make_hash(
-            str(job.get("job_url", "")),
-            str(job.get("title", "")),
-            str(job.get("company", ""))
-        )
-        return h not in seen_hashes
+def not_seen_filter(df: pd.DataFrame, seen_hashes: set) -> pd.DataFrame:
+    """
+    Vectorized dedup — removes jobs whose hash is already in the DB.
+
+    Old approach: df.apply(row-by-row) calling make_hash() per row (slow).
+    New approach:
+      1. Build the three key columns as string Series (vectorized fillna + astype).
+      2. Concatenate them with '|' separator (vectorized string add).
+      3. Lower + strip (vectorized).
+      4. Compute MD5 via a single .map(hashlib.md5) call — far fewer Python
+         object creations than calling make_hash() once per row.
+      5. Use .isin(seen_hashes) for a vectorized set lookup — O(n) not O(n*k).
+    """
+    import hashlib as _hashlib
+
+    urls      = df.get("job_url", pd.Series("", index=df.index)).fillna("").astype(str)
+    titles    = df.get("title",   pd.Series("", index=df.index)).fillna("").astype(str)
+    companies = df.get("company", pd.Series("", index=df.index)).fillna("").astype(str)
+
+    # Build raw fingerprint strings vectorized, then hash each with MD5
+    raw = (urls + "|" + titles + "|" + companies).str.lower().str.strip()
+    hashes = raw.map(lambda s: _hashlib.md5(s.encode()).hexdigest())
+
+    mask   = ~hashes.isin(seen_hashes)
     before = len(df)
-    df = df[df.apply(not_seen, axis=1)]
-    print(f"🔁 Removed {before - len(df)} already-seen | ✨ New: {len(df)}")
+    df     = df[mask]
+    tprint(f"🔁 Removed {before - len(df)} already-seen | ✨ New: {len(df)}")
     return df
 
 
 def fetch_jobs_for_location(role, loc_config, fetch_linkedin_desc=False, retries=2):
-    """Scrape jobs with simple retry on network errors."""
+    """Scrape jobs with cache + simple retry on network errors. Thread-safe."""
+    # Check cache first — avoids redundant HTTP requests during repeated test runs
+    cache_key = _scrape_key(role, loc_config, fetch_linkedin_desc)
+    cached    = _cache_get(cache_key)
+    if cached is not None and not cached.empty:
+        tprint(f"     💾 Cache hit: {role} @ {loc_config['location']}")
+        return cached
+
     for attempt in range(retries + 1):
         try:
             df = scrape_jobs(
@@ -218,83 +349,93 @@ def fetch_jobs_for_location(role, loc_config, fetch_linkedin_desc=False, retries
                 linkedin_fetch_description = fetch_linkedin_desc,
                 verbose                    = 0,
             )
+            if not df.empty:
+                _cache_set(cache_key, df)   # persist for next run within TTL
             return df
         except Exception as e:
             if attempt < retries:
-                print(f"     ⚠️ Retry {attempt+1}/{retries} ({e})")
+                tprint(f"     ⚠️ Retry {attempt+1}/{retries} ({e})")
                 time.sleep(5)
             else:
-                print(f"     ❌ Failed after {retries+1} attempts: {e}")
+                tprint(f"     ❌ Failed after {retries+1} attempts: {e}")
                 return pd.DataFrame()
+
+
+# ── CONCURRENT WORKER ────────────────────────────────────
+def _run_search(task):
+    """
+    Worker executed in thread pool.
+    task = (role, loc_config, region_tag, fetch_linkedin_desc)
+    Returns (region_tag, df).
+    """
+    role, loc_config, region_tag, fetch_linkedin_desc = task
+    tprint(f"  -> {region_tag}: {role} @ {loc_config['location']}")
+    df = fetch_jobs_for_location(role, loc_config, fetch_linkedin_desc=fetch_linkedin_desc)
+    if not df.empty:
+        df["searched_role"] = role
+        df["region"]        = region_tag
+        tprint(f"     + {len(df)} results ({role} @ {loc_config['location']})")
+    return region_tag, df
 
 
 # ── MAIN FETCH ───────────────────────────────────────────
 def fetch_top_jobs():
     india_dfs   = []
     foreign_dfs = []
-    seen_combos = set()
     run_start   = time.time()
 
     seen_hashes = get_all_seen_hashes()
-    print(f"🗃️  Loaded {len(seen_hashes)} seen job hashes from DB")
+    tprint(f"🗃️  Loaded {len(seen_hashes)} seen job hashes from DB")
 
-    # ── FIX 3a: updated section label (Naukri moved to RSS scraper) ──
-    t0 = time.time()
-    print("\n🔍 [1/4] Regular searches (Indeed / Glassdoor / Google)...")
+    # Build task lists upfront
+    regular_tasks = []
+    seen_foreign  = set()
     for role in ALL_ROLES:
         for loc in INDIA_LOCATIONS:
-            print(f"  India: {role} @ {loc['location']}...")
-            df = fetch_jobs_for_location(role, loc)
-            if not df.empty:
-                df["searched_role"] = role
-                df["region"]        = "india"
-                india_dfs.append(df)
-                print(f"     {len(df)} results")
-            time.sleep(5)
-
+            regular_tasks.append((role, loc, "india", False))
         for loc in FOREIGN_LOCATIONS:
             key = (role, loc["location"])
-            if key in seen_combos:
-                continue
-            seen_combos.add(key)
-            print(f"  Foreign: {role} @ {loc['location']}...")
-            df = fetch_jobs_for_location(role, loc)
-            if not df.empty:
-                df["searched_role"] = role
-                df["region"]        = "foreign"
-                foreign_dfs.append(df)
-                print(f"     {len(df)} results")
-            time.sleep(5)
-    print(f"⏱️  Section done in {(time.time()-t0)/60:.1f} min")
-
-    t0 = time.time()
-    print("\n🏢 [2/4] FAANG searches (Bangalore + Hyderabad)...")
+            if key not in seen_foreign:
+                seen_foreign.add(key)
+                regular_tasks.append((role, loc, "foreign", False))
     for role in FAANG_SEARCHES:
         for loc in FAANG_LOCATIONS:
-            print(f"  FAANG: {role} @ {loc['location']}...")
-            df = fetch_jobs_for_location(role, loc)
-            if not df.empty:
-                df["searched_role"] = role
-                df["region"]        = "india"
-                india_dfs.append(df)
-                print(f"     {len(df)} results")
-            time.sleep(5)
-    print(f"⏱️  Section done in {(time.time()-t0)/60:.1f} min")
+            regular_tasks.append((role, loc, "india", False))
 
-    # ── FIX 4: removed duplicate comment line ──
+    linkedin_tasks = [
+        (role, loc, "india", True)
+        for role in ALL_ROLES
+        for loc in LINKEDIN_INDIA_LOCATIONS
+    ]
+
+    # Sections 1+2 — Indeed/Google/FAANG in parallel
     t0 = time.time()
-    print("\n🔵 [3/4] LinkedIn India searches (with descriptions)...")
-    for role in ALL_ROLES:
-        for loc in LINKEDIN_INDIA_LOCATIONS:
-            print(f"  LinkedIn IN: {role} @ {loc['location']}...")
-            df = fetch_jobs_for_location(role, loc, fetch_linkedin_desc=True)
-            if not df.empty:
-                df["searched_role"] = role
-                df["region"]        = "india"
-                india_dfs.append(df)
-                print(f"     {len(df)} results")
-            time.sleep(8)
-    print(f"⏱️  Section done in {(time.time()-t0)/60:.1f} min")
+    tprint(f"\n🔍 [1-2/4] {len(regular_tasks)} Indeed/Google/FAANG searches "
+           f"({MAX_WORKERS} threads)...")
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        futures = {pool.submit(_run_search, t): t for t in regular_tasks}
+        for future in as_completed(futures):
+            try:
+                region_tag, df = future.result()
+                if not df.empty:
+                    (india_dfs if region_tag == "india" else foreign_dfs).append(df)
+            except Exception as exc:
+                tprint(f"     ❌ Worker error: {exc}")
+    tprint(f"⏱️  Sections 1-2 done in {(time.time()-t0)/60:.1f} min")
+
+    # Section 3 — LinkedIn with smaller pool (rate-limit friendly)
+    t0 = time.time()
+    tprint(f"\n🔵 [3/4] {len(linkedin_tasks)} LinkedIn searches (4 threads)...")
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = {pool.submit(_run_search, t): t for t in linkedin_tasks}
+        for future in as_completed(futures):
+            try:
+                _, df = future.result()
+                if not df.empty:
+                    india_dfs.append(df)
+            except Exception as exc:
+                tprint(f"     ❌ LinkedIn worker error: {exc}")
+    tprint(f"⏱️  Section 3 done in {(time.time()-t0)/60:.1f} min")
 
     def process(dfs):
         if not dfs:
@@ -303,43 +444,74 @@ def fetch_top_jobs():
         combined = combined.drop_duplicates(subset=["job_url"], keep="first")
         combined = combined[combined.apply(salary_ok, axis=1)]
         combined = combined[combined.apply(is_entry_level, axis=1)]
-        combined["skill_score"] = combined.apply(lambda j: skill_match_score(j)[0], axis=1)
-        combined = combined[combined["skill_score"] >= MIN_SKILL_SCORE]
+
+        # ── STEP 1: Keyword score (fast, vectorized — same as before) ──────
+        # Kept as a hard gate: jobs with zero keyword overlap are not relevant.
+        combined["keyword_score"] = batch_skill_scores(combined)
+        combined["skill_score"]   = combined["keyword_score"]  # DB backward compat
+        combined = combined[combined["keyword_score"] >= MIN_SKILL_SCORE]
+
+        if combined.empty:
+            return combined
+
+        # ── STEP 2: Semantic score (SentenceTransformer cosine similarity) ──
+        # Understands context — "builds LLM pipelines" scores high even without
+        # exact keywords. Falls back to 0.0 per job if model is unavailable.
+        combined["semantic_score"] = scorer.compute_semantic_scores(combined)
+
+        # ── STEP 3: Composite final score ─────────────────────────────
+        # final = 0.45*semantic + 0.35*keyword + 0.20*recency  (all 0–100)
+        combined["final_score"] = scorer.compute_final_scores(
+            combined, combined["keyword_score"]
+        )
+
+        # ── STEP 4: Fuzzy dedup (removes near-duplicate titles at same company) ─
+        # Requires rapidfuzz; skipped gracefully if not installed.
+        combined = fuzzy_dedup(combined)
+
         if "max_amount" in combined.columns:
             combined["max_amount"] = pd.to_numeric(combined["max_amount"], errors="coerce").fillna(0)
         else:
             combined["max_amount"] = 0
-        combined = combined.sort_values(["skill_score", "max_amount"], ascending=[False, False])
+
+        # Sort by composite score first, then salary as tiebreaker
+        combined = combined.sort_values(["final_score", "max_amount"], ascending=[False, False])
         return combined
 
     india_final   = process(india_dfs)
     foreign_final = process(foreign_dfs)
-
     top_india   = india_final.head(12)  if not india_final.empty   else pd.DataFrame()
     top_foreign = foreign_final.head(8) if not foreign_final.empty else pd.DataFrame()
-    print(f"\n🇮🇳 India jobs selected:   {len(top_india)}")
-    print(f"🌍 Foreign jobs selected: {len(top_foreign)}")
+    tprint(f"\n🇮🇳 India jobs selected:   {len(top_india)}")
+    tprint(f"🌍 Foreign jobs selected: {len(top_foreign)}")
 
-    # ── FIX 3b: updated section label + FIX 1: head(10) ──
+    # Section 4 — Company scrapers (concurrent inside fetch_all_company_jobs)
     t0 = time.time()
-    print("\n🏢 [4/4] Direct career pages (Amazon · Lever · Greenhouse · Naukri RSS · Instahyre · Hirist · Wellfound)...")
+    tprint("\n🏢 [4/4] Direct career pages (Amazon · Lever · Greenhouse · "
+           "Naukri RSS · Instahyre · Hirist · Wellfound)...")
     company_df = fetch_all_company_jobs()
     if not company_df.empty:
         company_df["from_company_scraper"] = True
         company_df = company_df[company_df.apply(is_entry_level, axis=1)]
-        company_df["skill_score"] = company_df.apply(lambda j: skill_match_score(j)[0], axis=1)
-        company_df = company_df[company_df["skill_score"] >= MIN_SKILL_SCORE]
-        # FIX 1: increased from head(5) → head(10) for 6 sources now
-        top_company = company_df.sort_values("skill_score", ascending=False).head(10)
-        print(f"  {len(top_company)} company jobs after filter")
+        company_df["keyword_score"]  = batch_skill_scores(company_df)
+        company_df["skill_score"]    = company_df["keyword_score"]
+        company_df = company_df[company_df["keyword_score"] >= MIN_SKILL_SCORE]
+        if not company_df.empty:
+            company_df["semantic_score"] = scorer.compute_semantic_scores(company_df)
+            company_df["final_score"]    = scorer.compute_final_scores(
+                company_df, company_df["keyword_score"]
+            )
+            company_df = fuzzy_dedup(company_df)
+        top_company = company_df.sort_values("final_score", ascending=False).head(10)
+        tprint(f"  {len(top_company)} company jobs after filter")
     else:
         top_company = pd.DataFrame()
-        print("  No company jobs found")
-    print(f"⏱️  Section done in {(time.time()-t0)/60:.1f} min")
+        tprint("  No company jobs found")
+    tprint(f"⏱️  Section 4 done in {(time.time()-t0)/60:.1f} min")
 
     all_parts = [x for x in [top_india, top_foreign, top_company] if not x.empty]
     if not all_parts:
-        print("No jobs found from any source.")
+        tprint("No jobs found from any source.")
         return pd.DataFrame()
 
     final = pd.concat(all_parts, ignore_index=True)
@@ -352,14 +524,14 @@ def fetch_top_jobs():
 
     india_count   = len(final[final["region"] == "india"])   if "region" in final.columns else 0
     foreign_count = len(final[final["region"] == "foreign"]) if "region" in final.columns else 0
-    print(f"\n✅ Final — India: {india_count} | Foreign: {foreign_count} | Total: {len(final)}")
-    print(f"⏱️  Total runtime: {(time.time()-run_start)/60:.1f} min")
+    tprint(f"\n✅ Final — India: {india_count} | Foreign: {foreign_count} | Total: {len(final)}")
+    tprint(f"⏱️  Total runtime: {(time.time()-run_start)/60:.1f} min")
     return final
 
 
 # ── EMAIL ────────────────────────────────────────────────
 def build_followup_section():
-    """Build HTML section for jobs needing follow-up (applied 7+ days ago, no stage update)."""
+    """Build HTML for jobs needing follow-up (applied 7+ days ago, no stage update)."""
     followups = get_followup_jobs(days=7)
     if not followups:
         return ""
@@ -368,9 +540,8 @@ def build_followup_section():
         id_, title, company, location, url, date_applied, notes = row
         days_ago = ""
         try:
-            from datetime import date
-            d = date.fromisoformat(date_applied)
-            days_ago = f"{(date.today() - d).days} days ago"
+            d = date_type.fromisoformat(date_applied)
+            days_ago = f"{(date_type.today() - d).days} days ago"
         except Exception:
             days_ago = date_applied
         cards += f"""
@@ -439,11 +610,8 @@ def build_email_html(df):
     india_jobs   = df[df["region"] == "india"]   if "region" in df.columns else df
     foreign_jobs = df[df["region"] == "foreign"] if "region" in df.columns else pd.DataFrame()
 
-    # FIX 2: all keys lowercase — role_tag.strip().lower() lookup works correctly
-    # for both "AI engineer" (from ROLES) and "ai engineer" (from scrapers)
     role_colors = {
         "software engineer"        : ("#e8f5e9", "#1b5e20"),
-        "full stack developer"     : ("#e3f2fd", "#0d47a1"),
         "machine learning engineer": ("#f3e5f5", "#6a1b9a"),
         "ai engineer"              : ("#fce4ec", "#880e4f"),
         "backend developer python" : ("#fff8e1", "#f57f17"),
@@ -463,7 +631,9 @@ def build_email_html(df):
             is_remote = job.get("is_remote", False)
             role_tag  = str(job.get("searched_role", ""))
             currency  = str(job.get("currency", "USD")).upper()
-            skill_sc  = float(job.get("skill_score", 0))
+            keyword_sc  = float(job.get("keyword_score",  job.get("skill_score", 0)))
+            semantic_sc = float(job.get("semantic_score", 0))
+            final_sc    = float(job.get("final_score",    keyword_sc))
 
             try:
                 if pd.notna(job.get("min_amount")) and pd.notna(job.get("max_amount")):
@@ -477,13 +647,14 @@ def build_email_html(df):
                 salary = "Salary not disclosed"
                 salary_color = "#999"
 
-            bar_color = "#4caf50" if skill_sc >= 50 else "#ff9800" if skill_sc >= 25 else "#f44336"
+            bar_color = "#4caf50" if final_sc >= 55 else "#ff9800" if final_sc >= 35 else "#f44336"
             skill_bar = f"""
             <div style="margin:6px 0 4px;">
-              <span style="font-size:11px;color:#666;">Resume Match: <b>{skill_sc}%</b></span>
-              <div style="background:#eee;border-radius:4px;height:6px;margin-top:3px;">
-                <div style="background:{bar_color};width:{min(skill_sc,100)}%;height:6px;border-radius:4px;"></div>
+              <span style="font-size:12px;color:#333;font-weight:bold;">Match Score: {final_sc:.0f}%</span>
+              <div style="background:#eee;border-radius:4px;height:7px;margin:3px 0 4px;">
+                <div style="background:{bar_color};width:{min(final_sc,100):.0f}%;height:7px;border-radius:4px;"></div>
               </div>
+              <span style="font-size:10px;color:#999;">Semantic: {semantic_sc:.0f}% &nbsp;&bull;&nbsp; Keywords: {keyword_sc:.0f}%</span>
             </div>"""
 
             remote_badge = (
@@ -492,14 +663,13 @@ def build_email_html(df):
                 '<span style="background:#fce4ec;color:#c62828;padding:3px 8px;border-radius:10px;font-size:11px;font-weight:bold;">On-site</span>'
             )
 
-            # FIX 2: use .strip().lower() so "AI engineer" → "ai engineer" matches dict key
             rbg, rclr = role_colors.get(role_tag.strip().lower(), ("#f5f5f5", "#333"))
 
             apply_btn = (
-                f'<a href="{job_url}" style="display:inline-block;background:#1b5e20;color:white;'
+                f'<a href="{html_module.escape(job_url)}" style="display:inline-block;background:#1b5e20;color:white;'
                 f'padding:9px 20px;border-radius:8px;text-decoration:none;font-size:13px;'
                 f'font-weight:bold;margin-top:10px;">Apply Now</a>'
-                if job_url else
+                if is_safe_url(job_url) else
                 '<span style="color:#ccc;font-size:12px;">No link</span>'
             )
 
@@ -548,14 +718,13 @@ def build_email_html(df):
                     padding:22px 24px;margin-bottom:16px;color:white;">
           <h1 style="margin:0 0 6px;font-size:20px;">Deepak's Job Alerts - {date_str}</h1>
           <p style="margin:2px 0;font-size:12px;opacity:0.9;">India: {len(india_jobs)} | Foreign: {len(foreign_jobs)}</p>
-          <p style="margin:2px 0;font-size:12px;opacity:0.9;">Min Rs.15L/yr or $22K/yr | Under 2yr exp | Resume-matched</p>
+          <p style="margin:2px 0;font-size:12px;opacity:0.9;">Min Rs.12L/yr or $22K/yr | Under 2yr exp | Resume-matched</p>
           <p style="margin:4px 0 0;font-size:11px;opacity:0.75;">Skills: Python, React, Azure, RAG, FastAPI, TypeScript, ML</p>
         </div>
         {build_weekly_summary_section()}
         {build_followup_section()}
         {india_section}
         {foreign_section}
-        <!-- FIX 5: updated footer to include all sources -->
         <div style="text-align:center;padding:14px;font-size:11px;color:#aaa;">
           Resume-matched via JobSpy · Amazon · Lever · Greenhouse · Naukri RSS · Instahyre · Hirist · Wellfound | {datetime.now().strftime("%I:%M %p")} IST
         </div>
@@ -570,7 +739,7 @@ def send_email(html_body, job_count):
     msg["From"]    = GMAIL_USER
     msg["To"]      = TO_EMAIL
     msg.attach(MIMEText(html_body, "html", "utf-8"))
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as server:
         server.login(GMAIL_USER, GMAIL_PASSWORD)
         server.sendmail(GMAIL_USER, TO_EMAIL, msg.as_string())
     print(f"✅ Email sent at {datetime.now().strftime('%I:%M %p')}")
@@ -585,7 +754,7 @@ def send_crash_email(error_msg):
         msg["To"]      = TO_EMAIL
         body = f"Job alert script crashed at {datetime.now()}\n\nError:\n{error_msg}"
         msg.attach(MIMEText(body, "plain", "utf-8"))
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as server:
             server.login(GMAIL_USER, GMAIL_PASSWORD)
             server.sendmail(GMAIL_USER, TO_EMAIL, msg.as_string())
         print("Crash alert email sent.")
@@ -596,6 +765,28 @@ def send_crash_email(error_msg):
 # ── RUN ──────────────────────────────────────────────────
 def run_job_alert():
     init_db()
+
+    # FIX #1: warmup runs in a daemon thread so it truly overlaps with scraping.
+    # Previously it blocked here for ~15 s before fetch_top_jobs() even started.
+    # The NLI singleton uses a threading.Lock() so it’s safe to load in parallel;
+    # any job that reaches is_entry_level_ml() before warmup finishes will simply
+    # wait on the lock for the remaining load time — worst case a few seconds, not 15.
+    # Both heavy models load in background threads so scraping starts immediately.
+    # They'll be ready before scoring runs (scraping takes ~5 min).
+    _warmup_t = threading.Thread(target=warmup_nli_model,         daemon=True, name="nli-warmup")
+    _embed_t  = threading.Thread(target=scorer.warmup_embed_model, daemon=True, name="embed-warmup")
+    _warmup_t.start()
+    _embed_t.start()
+    print("[NLI]   Stage 2 filter  loading in background (nli-deberta-v3-small)...")
+    print("[EMBED] Semantic scorer loading in background (all-MiniLM-L6-v2)...")
+
+    # Fail fast — don't spend 30 min scraping then crash at email send
+    missing = [k for k, v in {"GMAIL_USER": GMAIL_USER, "GMAIL_PASSWORD": GMAIL_PASSWORD,
+                               "TO_EMAIL": TO_EMAIL}.items() if not v]
+    if missing:
+        print(f"💥 Missing required env vars: {', '.join(missing)}")
+        print("   Check your .env file and try again.")
+        sys.exit(1)
 
     print(f"\n{'='*52}")
     print(f"Job Alert - {datetime.now().strftime('%d %b %Y %I:%M %p')}")
@@ -608,7 +799,8 @@ def run_job_alert():
         print(f"💾 Saved {saved} new jobs to database")
 
         stats = get_stats()
-        print(f"📊 DB Stats - Total: {stats['total']} | Applied: {stats['applied']} | Pending: {stats['pending']} | Skipped: {stats['skipped']}")
+        print(f"📊 DB Stats - Total: {stats['total']} | Applied: {stats['applied']} | "
+              f"Pending: {stats['pending']} | Skipped: {stats['skipped']}")
 
         print(f"\n📧 Sending email with {len(df)} jobs...")
         html = build_email_html(df)

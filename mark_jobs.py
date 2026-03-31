@@ -3,8 +3,9 @@ Quick DB updater — run this after Claude tells you to.
 Usage: python mark_jobs.py
 """
 import sqlite3
+import os
 
-DB_PATH = "job_tracker.db"
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "job_tracker.db")
 
 UPDATES = [
     # (company_keyword, decision)   decision = 'yes' / 'no'

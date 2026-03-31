@@ -7,8 +7,14 @@ Built with FastMCP for modern MCP protocol compliance.
 """
 
 import logging
+import sys
+import os
 from typing import Optional, List
 import pandas as pd
+
+# Add project root to path so filters.py is importable
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from filters import is_entry_level as _filter_is_entry_level
 
 # Modern MCP imports (2025)
 from mcp.server.fastmcp import FastMCP, Context
@@ -111,9 +117,27 @@ async def scrape_jobs_tool(
         if jobs_df.empty:
             await ctx.warning("No jobs found matching the search criteria")
             return "No jobs found matching your criteria. Try adjusting your search parameters."
-        
+
+        # ── Filter out senior/experienced roles (logic lives in filters.py) ──
+        def _is_entry(row):
+            return _filter_is_entry_level(
+                title       = str(row.get("title", "")),
+                description = str(row.get("description", "")),
+                job_level   = str(row.get("job_level", "")),
+                job_url     = str(row.get("job_url", "")),
+            )
+
+        original_count = len(jobs_df)
+        jobs_df = jobs_df[jobs_df.apply(_is_entry, axis=1)]
+        filtered_count = original_count - len(jobs_df)
+        if filtered_count:
+            await ctx.info(f"Filtered out {filtered_count} senior/experienced roles")
+
+        if jobs_df.empty:
+            return "No entry-level jobs found. All results required 2+ years experience or were senior roles."
+
         # Format results
-        results_summary = f"🎯 Found {len(jobs_df)} jobs for '{search_term}'"
+        results_summary = f"🎯 Found {len(jobs_df)} entry-level jobs for '{search_term}' (filtered {filtered_count} senior roles)"
         if location:
             results_summary += f" in {location}"
         
