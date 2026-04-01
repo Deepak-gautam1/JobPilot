@@ -42,5 +42,4 @@ Thumbs.db
 
 
 # .gitignore
-job_tracker_1.db
 .scrape_cache.json

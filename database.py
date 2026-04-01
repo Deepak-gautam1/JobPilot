@@ -53,11 +53,6 @@ def init_db():
             )
         """)
 
-        # Indexes for fast dedup lookups and stats queries
-        c.execute("CREATE INDEX IF NOT EXISTS idx_job_hash  ON jobs(job_hash)")
-        c.execute("CREATE INDEX IF NOT EXISTS idx_applied   ON jobs(applied)")
-        c.execute("CREATE INDEX IF NOT EXISTS idx_scraped   ON jobs(date_scraped)")
-        c.execute("CREATE INDEX IF NOT EXISTS idx_final_sc  ON jobs(final_score)")
 
         # Migrate existing DBs that don't have newer columns
         existing_cols = [row[1] for row in c.execute("PRAGMA table_info(jobs)").fetchall()]
@@ -73,6 +68,13 @@ def init_db():
         if "final_score" not in existing_cols:
             c.execute("ALTER TABLE jobs ADD COLUMN final_score REAL")
 
+
+        
+        # Indexes for fast dedup lookups and stats queries
+        c.execute("CREATE INDEX IF NOT EXISTS idx_job_hash  ON jobs(job_hash)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_applied   ON jobs(applied)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_scraped   ON jobs(date_scraped)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_final_sc  ON jobs(final_score)")
 
 def make_hash(job_url, title, company):
     """Create a unique fingerprint for a job."""

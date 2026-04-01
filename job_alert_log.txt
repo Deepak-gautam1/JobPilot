@@ -5349,3 +5349,12 @@ Traceback (most recent call last):
   File "C:\Users\dgautam\OneDrive - Kuwait Food Company\Desktop\Codes\chinpeerapat-jobspy\database.py", line 60, in init_db
     c.execute("CREATE INDEX IF NOT EXISTS idx_final_sc  ON jobs(final_score)")
 sqlite3.OperationalError: no such column: final_score
+Running job alert test...
+Traceback (most recent call last):
+  File "C:\Users\dgautam\OneDrive - Kuwait Food Company\Desktop\Codes\chinpeerapat-jobspy\job_alert.py", line 820, in <module>
+    run_job_alert()
+  File "C:\Users\dgautam\OneDrive - Kuwait Food Company\Desktop\Codes\chinpeerapat-jobspy\job_alert.py", line 767, in run_job_alert
+    init_db()
+  File "C:\Users\dgautam\OneDrive - Kuwait Food Company\Desktop\Codes\chinpeerapat-jobspy\database.py", line 60, in init_db
+    c.execute("CREATE INDEX IF NOT EXISTS idx_final_sc  ON jobs(final_score)")
+sqlite3.OperationalError: no such column: final_score
