@@ -2,7 +2,7 @@ name: JobPilot Scheduler
 
 on:
   schedule:
-    - cron: "30 14 * * *" # 8 PM IST
+    - cron: "30 12 * * *" # 6 PM IST
   workflow_dispatch:
 
 env:
